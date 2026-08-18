@@ -1,58 +1,165 @@
-const fetch = require('node-fetch');
+const fetch = require("node-fetch");
 
 exports.handler = async (event) => {
-  // Only allow POST requests
-  if (event.httpMethod !== 'POST') {
+  // CORS / preflight
+  if (event.httpMethod === "OPTIONS") {
+    return {
+      statusCode: 204,
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Headers": "Content-Type",
+        "Access-Control-Allow-Methods": "POST, OPTIONS"
+      },
+      body: ""
+    };
+  }
+
+  if (event.httpMethod !== "POST") {
     return {
       statusCode: 405,
-      body: JSON.stringify({ error: 'Method Not Allowed' })
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        error: "Method Not Allowed"
+      })
     };
   }
 
   try {
     const API_KEY = process.env.PDSBOOST_API_KEY;
-    const API_URL = 'https://pdsboost.com/api/v2';
+    const API_URL = "https://pdsboost.com/api/v2";
 
     if (!API_KEY) {
       return {
         statusCode: 500,
-        body: JSON.stringify({ error: 'API key not configured' })
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          error: "PDSBOOST_API_KEY is not configured in Netlify."
+        })
       };
     }
 
-    // Get the data sent from the frontend
-    const body = JSON.parse(event.body || '{}');
+    let body = {};
 
-    // Add the secret key
+    try {
+      body = JSON.parse(event.body || "{}");
+    } catch {
+      return {
+        statusCode: 400,
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          error: "Invalid JSON request."
+        })
+      };
+    }
+
+    const action = body.action;
+
     const payload = {
       key: API_KEY,
-      ...body
+      action: action
     };
 
-    // Call PdsBoost
+    // ADD ORDER
+    if (action === "add") {
+      payload.service = body.service;
+      payload.link = body.link;
+      payload.quantity = body.quantity;
+
+      if (!payload.service || !payload.link || !payload.quantity) {
+        return {
+          statusCode: 400,
+          headers: {
+            "Access-Control-Allow-Origin": "*",
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            error: "service, link and quantity are required."
+          })
+        };
+      }
+    }
+
+    // ORDER STATUS
+    if (action === "status") {
+      payload.order = body.order;
+
+      if (!payload.order) {
+        return {
+          statusCode: 400,
+          headers: {
+            "Access-Control-Allow-Origin": "*",
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            error: "Order ID is required."
+          })
+        };
+      }
+    }
+
+    // SERVICES
+    if (action === "services") {
+      // nothing else needed
+    }
+
+    // BALANCE
+    if (action === "balance") {
+      // nothing else needed
+    }
+
     const response = await fetch(API_URL, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'Content-Type': 'application/x-www-form-urlencoded'
+        "Content-Type": "application/x-www-form-urlencoded"
       },
-      body: new URLSearchParams(payload)
+      body: new URLSearchParams(payload).toString()
     });
 
-    const data = await response.json();
+    const text = await response.text();
+
+    let data;
+
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = {
+        error: "PdsBoost returned an invalid response.",
+        raw: text
+      };
+    }
 
     return {
-      statusCode: 200,
+      statusCode: response.ok ? 200 : response.status,
       headers: {
-        'Access-Control-Allow-Origin': '*',
-        'Content-Type': 'application/json'
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Headers": "Content-Type",
+        "Content-Type": "application/json"
       },
       body: JSON.stringify(data)
     };
 
   } catch (error) {
+    console.error("PdsBoost proxy error:", error);
+
     return {
       statusCode: 500,
-      body: JSON.stringify({ error: 'Something went wrong', details: error.message })
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        error: "Proxy request failed.",
+        details: error.message
+      })
     };
   }
 };
